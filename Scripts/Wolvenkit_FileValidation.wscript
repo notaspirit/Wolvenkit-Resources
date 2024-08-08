@@ -693,7 +693,7 @@ function _validateAppFile(app, validateRecursively, calledFromEntFileValidation)
     if (checkIfFileIsBroken(app, 'app')) {
         return;
     }
-
+    
     // empty array with name collisions
     componentOverrideCollisions.length = 0;
     alreadyDefinedAppearanceNames.length = 0;
@@ -781,13 +781,12 @@ function entFile_appFile_validateComponent(component, _index, validateRecursivel
     if (componentName?.includes(":")) {
         return;
     }
-
     // allow empty paths for debug components
     let depotPathCanBeEmpty = isDebugComponent;
     let componentPropertyKeyWithDepotPath = '';
 
     // entGarmentSkinnedMeshComponent - entSkinnedMeshComponent - entMeshComponent
-    if (component?.mesh?.DepotPath) {
+    if (!!component?.mesh?.DepotPath) {
         type = WITH_MESH;
         componentPropertyKeyWithDepotPath = 'mesh';
         depotPathCanBeEmpty ||= componentName !== 'amm_prop_slot1' && componentName?.startsWith('amm_prop_slot');
@@ -796,9 +795,9 @@ function entFile_appFile_validateComponent(component, _index, validateRecursivel
         type = WITH_MESH;
         componentPropertyKeyWithDepotPath = 'morphResource';
     }
-
     // flag for mesh validation, in case this is called recursively from app file
     let hasMesh = false;
+
     switch (type) {
         case WITH_MESH:
             checkDepotPath(component[componentPropertyKeyWithDepotPath].DepotPath, `${info}.${componentName}`, depotPathCanBeEmpty);
@@ -839,7 +838,7 @@ function entFile_appFile_validateComponent(component, _index, validateRecursivel
     const meshDepotPath = `${hasMesh ? stringifyPotentialCName(component[componentPropertyKeyWithDepotPath]?.DepotPath) : '' || ''}`.trim();
 
     if (!validateRecursively || !hasMesh || hasUppercasePaths || meshDepotPath.endsWith('.morphtarget')) {
-        // Logger.Error(`${componentMeshPath}: not validating mesh`);
+        // Logger.Error(`${meshDepotPath}: not validating mesh`);
         return;
     }
 
@@ -861,8 +860,6 @@ function entFile_appFile_validateComponent(component, _index, validateRecursivel
 
     const genderSubstitutionOnly = componentMeshPaths.length === 2 && (meshDepotPath.match(/{|}/g)?.length || 0) === 2 && meshDepotPath.includes("{gender}")
 
-
-    // Logger.Success(componentMeshPaths);
     componentMeshPaths.forEach((componentMeshPath) => {
         // check for component name uniqueness
         if (meshesByComponentName[componentName] && meshesByComponentName[componentName] !== meshDepotPath) {
@@ -934,7 +931,7 @@ function entFile_appFile_validateComponent(component, _index, validateRecursivel
 
         if (hasGarmentSupportByMeshFile[componentMeshPath] && component.$type !== "entGarmentSkinnedMeshComponent") {
             invalidComponentTypes[info] ||= [];
-            invalidComponentTypes[info].push(`${info} includes a mesh with GarmentSupport, but is not an entGarmentSkinnedMeshComponent. GarmentSupport will not work.`);
+            invalidComponentTypes[info].push(`${info} uses meshes with garment support, but not in entGarmentSkinnedMeshComponent: ${componentMeshPath} has garment support.`);
         }
 
         if (!meshAppearances) { // for debugging
@@ -945,6 +942,19 @@ function entFile_appFile_validateComponent(component, _index, validateRecursivel
             // TODO: ArchiveXL variant checking
         } else if (meshAppearances && meshAppearances.length > 0 && !meshAppearances.includes(meshAppearanceName)) {
             appearanceNotFound(componentMeshPath, meshAppearanceName, `${info} (${componentName})`);
+        }
+        
+        if (validateRecursively) {
+            const fileContent = wkit.LoadGameFileFromProject(componentMeshPath, 'json');
+            const mesh = TypeHelper.JsonParse(fileContent);
+            
+            meshSettings ||= {
+                validateMaterialsRecursively: true,
+                checkDuplicateMlSetupFilePaths: true,
+                checkExternalMaterialPaths: true,
+            }
+            
+            _validateMeshFile(mesh)
         }
     });
 }
@@ -1020,7 +1030,7 @@ function entFile_validateAppearance(appearance) {
         return;
     }
 
-    if (!entSettings.validateRecursively) {
+    if (!entSettings.validateAppsRecursively) {
         return;
     }
 
@@ -1051,7 +1061,7 @@ function entFile_validateAppearance(appearance) {
             Logger.Warning(`${info}: File ${appFilePath} exists, but couldn't be parsed. If everything works, you can ignore this warning.`);
             invalidFiles.push(appFilePath);
         } else if (null !== appFile) {
-            _validateAppFile(appFile, entSettings.validateRecursively, true);
+            _validateAppFile(appFile, entSettings.validateMeshesRecursively, true);
         }
     }
 
@@ -1613,15 +1623,12 @@ function meshFile_collectDynamicChunkMaterials(mesh) {
         }
     }
 }
-export function validateMeshFile(mesh, _meshSettings) {
-    // check if settings are enabled
-    if (!_meshSettings?.Enabled) return;
 
+function _validateMeshFile(mesh) {
     // check if file needs to be called recursively or is invalid
-    if (mesh?.Data?.RootChunk) return validateMeshFile(mesh.Data.RootChunk, _meshSettings);
+    if (mesh?.Data?.RootChunk) return _validateMeshFile(mesh.Data.RootChunk);
     if (checkIfFileIsBroken(mesh, 'mesh')) return;
-
-    meshSettings = _meshSettings;
+    
     resetInternalFlagsAndCaches();
 
     checkMeshMaterialIndices(mesh);
@@ -1686,11 +1693,11 @@ export function validateMeshFile(mesh, _meshSettings) {
     if (mesh.renderResourceBlob !== "undefined") {
         numSubMeshes = mesh.renderResourceBlob?.Data?.header?.renderChunkInfos?.length;
     }
-    
+
     if (mesh.appearances.length === 0) return;
     const firstMaterialHasChunks = (mesh.appearances[0].Data.chunkMaterials || []).length >= numSubMeshes;
     const firstAppearanceName = stringifyPotentialCName(mesh.appearances[0].Data.name) ?? "";
-    
+
     for (let i = 0; i < mesh.appearances.length; i++) {
         let invisibleSubmeshes = [];
         let appearance = mesh.appearances[i].Data;
@@ -1699,7 +1706,7 @@ export function validateMeshFile(mesh, _meshSettings) {
         if (firstMaterialHasChunks && numAppearanceChunks === 0) {
             appearance.chunkMaterials = mesh.appearances[0].Data.chunkMaterials;
             for (let j = 0; i < appearance.chunkMaterials.length; i++) {
-                appearance.chunkMaterials[j].value = appearance.chunkMaterials[j].value.replaceAll(firstAppearanceName, appearanceName); 
+                appearance.chunkMaterials[j].value = appearance.chunkMaterials[j].value.replaceAll(firstAppearanceName, appearanceName);
             }
             numAppearanceChunks = appearance.chunkMaterials.length;
         }
@@ -1725,6 +1732,14 @@ export function validateMeshFile(mesh, _meshSettings) {
     printDuplicateMaterialWarnings();
 
     return true;
+}
+export function validateMeshFile(mesh, _meshSettings) {
+    // check if settings are enabled
+    if (!_meshSettings?.Enabled) return;
+
+    meshSettings = _meshSettings;
+    
+    _validateMeshFile(mesh);
 }
 
 //#endregion

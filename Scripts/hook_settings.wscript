@@ -81,11 +81,16 @@ const Settings = {
          */
         Enabled: true,
         /*
-         * Set this to "false" to disable recursive verification of linked .app files and meshes
+         * Set this to "false" to disable recursive verification of linked .app files
          * (e.g. if this is taking too long for your liking)
          */
-        validateRecursively: true,
-
+        validateAppsRecursively: true,
+        
+        /*
+         * Set this to "false" to disable recursive verification of linked meshes
+         * (e.g. if this is taking too long for your liking)
+         */
+        validateMeshesRecursively: true,
         /*
          * Set this to "false" to disable warnings about duplicate component names,
          * e.g. "The following components are defined more than once: [ pants_black ]"
